@@ -9,7 +9,10 @@ RecvStream::RecvStream(int fd) {
     _fd = fd;
     _cnt = 0;  
     _bufptr = _buf;
+    _eof = false;
 }
+
+
 
 ssize_t RecvStream::_recv(char *usrbuf, size_t n) {
     int cnt;
@@ -22,15 +25,22 @@ ssize_t RecvStream::_recv(char *usrbuf, size_t n) {
 		    return -1;
 	    }
 	    else if (_cnt == 0) {  // EOF
+            _eof = true;
             return 0;
         }  
 	    else {
+            if (_cnt < sizeof(_buf)) {
+                _eof = true;
+            } else {
+                _eof = false;
+            }
 	        _bufptr = _buf;  // 之前缓冲区已经清空，重置缓冲区指针    
         }
     }
 
     cnt = _cnt < n ? _cnt : n;  // 缓冲区不足n个byte则拷贝缓冲区所有byte
     memcpy(usrbuf, _bufptr, cnt);  // 线程安全?
+
     _bufptr += cnt;
     _cnt -= cnt;
     return cnt;

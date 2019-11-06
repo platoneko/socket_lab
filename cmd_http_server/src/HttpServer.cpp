@@ -67,21 +67,26 @@ void HttpServer::_handleRequest(int connfd) {
     struct stat sbuf;
     char buf[BUFSIZE];
     char method[MAXLINE], uri[MAXLINE], version[MAXLINE];
-    char filename[MAXLINE];
+    char filepath[MAXLINE];
+
+    bool persistent;
+
     RecvStream recvStream = RecvStream(connfd);
     if (recvStream.bufferedRecvLine(buf, BUFSIZE) <= 0) {
         return;
     };
     _readRequestLine(buf, method, uri, version);  // 解析HTTP请求行
-    _readRequestHeaders(recvStream);
+    _readRequestHeaders(recvStream, persistent);
+    _readRequestBody(recvStream);
+
     if (strcmp(method, "GET") != 0) {  // 线程安全?
         _errorPage(connfd, method, "501", "Not implemented", 
                    "本辣鸡不提供这种服务！");
         return;
     }
     
-    _getFilename(filename, uri);
-    if (stat(filename, &sbuf) < 0) {
+    _getFilepath(filepath, uri);
+    if (stat(filepath, &sbuf) < 0) {
         _errorPage(connfd, uri, "404", "Not found", 
                    "垃圾堆里没有这个文件！");
         return;
@@ -92,7 +97,7 @@ void HttpServer::_handleRequest(int connfd) {
                    "无权访问！");
         return;
     } else {
-        _staticResponse(connfd, filename, sbuf.st_size);
+        _staticResponse(connfd, filepath, sbuf.st_size);
     }
 }
 
@@ -117,12 +122,12 @@ void HttpServer::_errorPage(int fd, const char *cause, const char *errnum, const
 
 }
 
-void HttpServer::_staticResponse(int fd, const char *filename, int filesize) {
+void HttpServer::_staticResponse(int fd, const char *filepath, int filesize) {
     int srcfd;
     char MIME[MAXLINE], buf[BUFSIZE], tmp[MAXLINE];
     void *srcp;
 
-    _getMIME(filename, MIME);
+    _getMIME(filepath, MIME);
     strcpy(buf, "HTTP/1.0 200 OK\r\n");
     strcat(buf, "Server: CYX PC\r\n");
     strcat(buf, "Connection: close\r\n");
@@ -132,7 +137,7 @@ void HttpServer::_staticResponse(int fd, const char *filename, int filesize) {
     strcat(buf, tmp);
     send(fd, buf, strlen(buf), 0);
     
-    srcfd = open(filename, O_RDONLY, 0);
+    srcfd = open(filepath, O_RDONLY, 0);
     if (srcfd < 0) {
         exit(-1);
     }
@@ -142,24 +147,24 @@ void HttpServer::_staticResponse(int fd, const char *filename, int filesize) {
     munmap(srcp, filesize);
 }
 
-void HttpServer::_getMIME(const char *filename, char *MIME) {
-    if (strstr(filename, ".html")) 
+void HttpServer::_getMIME(const char *filepath, char *MIME) {
+    if (strstr(filepath, ".html")) 
         strcpy(MIME, "text/html");
-    else if (strstr(filename, ".css")) 
+    else if (strstr(filepath, ".css")) 
         strcpy(MIME, "text/css");
-    else if (strstr(filename, ".js")) 
+    else if (strstr(filepath, ".js")) 
         strcpy(MIME, "text/javascript");
-    else if (strstr(filename, ".gif")) 
+    else if (strstr(filepath, ".gif")) 
         strcpy(MIME, "image/gif");
-    else if (strstr(filename, ".png")) 
+    else if (strstr(filepath, ".png")) 
         strcpy(MIME, "image/png");
-    else if (strstr(filename, ".jpg")) 
+    else if (strstr(filepath, ".jpg")) 
         strcpy(MIME, "image/jpeg");
-    else if (strstr(filename, ".bmp")) 
+    else if (strstr(filepath, ".bmp")) 
         strcpy(MIME, "image/bmp");
-    else if (strstr(filename, ".webp")) 
+    else if (strstr(filepath, ".webp")) 
         strcpy(MIME, "image/webp");
-    else if (strstr(filename, ".ico")) 
+    else if (strstr(filepath, ".ico")) 
         strcpy(MIME, "image/x-icon");
     else
         strcpy(MIME, "text/plain");
@@ -182,25 +187,55 @@ void HttpServer::_readRequestLine(char *buf, char *method, char *uri, char *vers
     *version = '\0';
 }
 
-void HttpServer::_readRequestHeaders(RecvStream &recvStream) {
+void HttpServer::_readRequestHeaders(RecvStream &recvStream, bool &persistent) {
     char buf[BUFSIZE];
+    persistent = false;
     recvStream.bufferedRecvLine(buf, BUFSIZE);
+    if (strcmp(buf, "Connection: keep-alive\r\n") == 0) {
+        persistent = true;
+    }
     while (strcmp(buf, "\r\n")) {
         recvStream.bufferedRecvLine(buf, BUFSIZE);
+        if (persistent || strcmp(buf, "Connection: keep-alive\r\n") == 0) {
+            persistent = true;
+        }
     }
-    return;
 }
 
-void HttpServer::_getFilename(char *filename, const char *uri) {
+void HttpServer::_readRequestBody(RecvStream &recvStream) {
+    char buf[BUFSIZE];
+    if (recvStream.recvEOF()) {
+        if (recvStream.isEmpty()) {  // body为空
+            return;
+        }  else {
+            recvStream.bufferedRecv(buf, BUFSIZE);
+            return;
+        }
+    }
+    if (!recvStream.recvEOF()) {
+        recvStream.bufferedRecv(buf, BUFSIZE);
+        while (!recvStream.recvEOF()) {
+            recvStream.bufferedRecv(buf, BUFSIZE);
+        } 
+        if (recvStream.isEmpty()) {
+            return;
+        } else {
+            recvStream.bufferedRecv(buf, BUFSIZE);
+            return;
+        }
+    }
+}
+
+void HttpServer::_getFilepath(char *filepath, const char *uri) {
     if (strcmp(uri, "") == 0) {
-        strcpy(filename, (_root + "index.html").c_str());
+        strcpy(filepath, (_root + "index.html").c_str());
     } else if (uri[strlen(uri)-1] == '/') {
-        strcpy(filename, (_root + uri + "index.html").c_str());
+        strcpy(filepath, (_root + uri + "index.html").c_str());
     } else if (strcmp(uri, "/about") == 0 ||
                strcmp(uri, "/archives") == 0) {
-        strcpy(filename, (_root + uri + "/index.html").c_str());
+        strcpy(filepath, (_root + uri + "/index.html").c_str());
     } else {
-        strcpy(filename, (_root + uri).c_str());
+        strcpy(filepath, (_root + uri).c_str());
     }
-    printf("%s\n", filename);
+    printf("%s\n", filepath);
 }

@@ -20,8 +20,9 @@ class HttpServer  {
     void _errorPage(int fd, const char *cause, const char *errnum, 
                     const char *shortmsg, const char *longmsg);
     void _staticResponse(int fd, const char *filename, int filesize);
-    void _getMIME(const char *filename, char *MIME);
-    void _readRequestHeaders(RecvStream &recvStream);
+    void _getMIME(const char *filepath, char *MIME);
+    void _readRequestHeaders(RecvStream &recvStream, bool &persistent);
     void _readRequestLine(char *buf, char *method, char *uri, char *version);
-    void _getFilename(char *filename, const char *uri);
+    void _readRequestBody(RecvStream &recvStream);
+    void _getFilepath(char *filepath, const char *uri);
 };
