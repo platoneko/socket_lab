@@ -12,16 +12,13 @@ RecvStream::RecvStream(int fd) {
     _eof = false;
 }
 
-
-
 ssize_t RecvStream::_recv(char *usrbuf, size_t n) {
     int cnt;
 
     if (_cnt <= 0) {  // 如果缓冲区为空，则从连接套接字(connfd)读取字节来填满缓冲区
 	    _cnt = recv(_fd, _buf, sizeof(_buf), 0);
 	    if (_cnt < 0) {
-            printf("RECV ERROR!!!\n");
-            exit(-1);
+            printf("CONNECTION TIMEOUT: %d\n", _fd);
 		    return -1;
 	    }
 	    else if (_cnt == 0) {  // EOF

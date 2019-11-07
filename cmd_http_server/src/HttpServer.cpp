@@ -8,6 +8,7 @@
 #include <fcntl.h>
 #include <sys/mman.h>
 #include <thread>
+#include <time.h>
 
 #define MAXLINE 1024
 #define BUFSIZE 8192
@@ -16,9 +17,10 @@
 int HttpServer::run() {
     int listenfd = _openListenfd();
 
-    auto threadFun = [&](int connfd) -> void {
+    auto threadFun = [&](int connfd, char *client_hostname, char *client_port) -> void {
         _handleRequest(connfd);
         close(connfd);
+        printf("CLOSE CONNECTION: %s:%s at connfd: %d\n", client_hostname, client_port, connfd);
     };
     
     while (1) {
@@ -29,9 +31,11 @@ int HttpServer::run() {
 
         clientlen = sizeof(struct sockaddr_storage);
         connfd = accept(listenfd, (struct sockaddr *)&clientaddr, &clientlen);
+        setsockopt(connfd, SOL_SOCKET, SO_RCVTIMEO, &_timeoutVal, sizeof(_timeoutVal));
         getnameinfo((struct sockaddr *)&clientaddr, clientlen, client_hostname, MAXLINE, 
                     client_port, MAXLINE, 0);
-        std::thread t(threadFun, connfd);
+        printf("CONNECTION: %s:%s at connfd: %d\n", client_hostname, client_port, connfd);
+        std::thread t(threadFun, connfd, client_hostname, client_port);
         t.detach();
     }
 }
@@ -70,9 +74,10 @@ void HttpServer::_handleRequest(int connfd) {
     char filepath[MAXLINE];
 
     bool persistent;
+    uint n;
 
     RecvStream recvStream = RecvStream(connfd);
-    if (recvStream.bufferedRecvLine(buf, BUFSIZE) <= 0) {
+    if ((n = recvStream.bufferedRecvLine(buf, BUFSIZE)) <= 0) {
         return;
     };
     _readRequestLine(buf, method, uri, version);  // 解析HTTP请求行
@@ -97,7 +102,38 @@ void HttpServer::_handleRequest(int connfd) {
                    "无权访问！");
         return;
     } else {
-        _staticResponse(connfd, filepath, sbuf.st_size);
+        _staticResponse(connfd, filepath, sbuf.st_size, persistent);
+    }
+    
+    while (persistent) {
+        if (recvStream.bufferedRecvLine(buf, BUFSIZE) <= 0) {
+            return;
+        };
+        printf("%s", buf);
+        _readRequestLine(buf, method, uri, version);  // 解析HTTP请求行
+        _readRequestHeaders(recvStream, persistent);
+        _readRequestBody(recvStream);
+
+        if (strcmp(method, "GET") != 0) {  // 线程安全?
+            _errorPage(connfd, method, "501", "Not implemented", 
+                        "本辣鸡不提供这种服务！");
+            return;
+        }
+    
+        _getFilepath(filepath, uri);
+        if (stat(filepath, &sbuf) < 0) {
+            _errorPage(connfd, uri, "404", "Not found", 
+                    "垃圾堆里没有这个文件！");
+            return;
+        }
+
+        if (!(S_ISREG(sbuf.st_mode)) || !(S_IRUSR & sbuf.st_mode)) {
+            _errorPage(connfd, uri, "403", "Forbidden", 
+                    "无权访问！");
+            return;
+        } else {
+            _staticResponse(connfd, filepath, sbuf.st_size, persistent);
+        }
     }
 }
 
@@ -122,15 +158,19 @@ void HttpServer::_errorPage(int fd, const char *cause, const char *errnum, const
 
 }
 
-void HttpServer::_staticResponse(int fd, const char *filepath, int filesize) {
+void HttpServer::_staticResponse(int fd, const char *filepath, int filesize, bool persistent) {
     int srcfd;
     char MIME[MAXLINE], buf[BUFSIZE], tmp[MAXLINE];
     void *srcp;
 
     _getMIME(filepath, MIME);
-    strcpy(buf, "HTTP/1.0 200 OK\r\n");
+    strcpy(buf, "HTTP/1.1 200 OK\r\n");
     strcat(buf, "Server: CYX PC\r\n");
-    strcat(buf, "Connection: close\r\n");
+    if (persistent) {
+        strcat(buf, "Connection: keep-alive\r\n");
+    } else {
+        strcat(buf, "Connection: close\r\n");
+    }
     snprintf(tmp, sizeof(tmp), "Content-length: %d\r\n", filesize);
     strcat(buf, tmp);
     snprintf(tmp, sizeof(tmp), "Content-type: %s\r\n\r\n", MIME);
@@ -237,5 +277,4 @@ void HttpServer::_getFilepath(char *filepath, const char *uri) {
     } else {
         strcpy(filepath, (_root + uri).c_str());
     }
-    printf("%s\n", filepath);
 }

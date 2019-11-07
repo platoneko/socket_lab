@@ -3,6 +3,11 @@
 #include <netinet/in.h>
 #include "../include/RecvStream.h"
 
+struct TimeVal {
+  time_t sec;
+  time_t usec;
+};
+
 
 class HttpServer  {
   private:
@@ -10,16 +15,18 @@ class HttpServer  {
     int _port;
     std::string _root;
     int _listenQueue;
+    TimeVal _timeoutVal;
+    
   public:
-    HttpServer(uint addr, int port, const std::string &root, int listenQueue):
-               _addr(addr), _port(port), _root(root), _listenQueue(listenQueue) {}
+    HttpServer(uint addr, int port, const std::string &root, int listenQueue, TimeVal timeoutVal):
+               _addr(addr), _port(port), _root(root), _listenQueue(listenQueue), _timeoutVal(timeoutVal) {}
     int run();
   private:
     int _openListenfd();
     void _handleRequest(int clientfd);
     void _errorPage(int fd, const char *cause, const char *errnum, 
                     const char *shortmsg, const char *longmsg);
-    void _staticResponse(int fd, const char *filename, int filesize);
+    void _staticResponse(int fd, const char *filename, int filesize, bool persistent);
     void _getMIME(const char *filepath, char *MIME);
     void _readRequestHeaders(RecvStream &recvStream, bool &persistent);
     void _readRequestLine(char *buf, char *method, char *uri, char *version);

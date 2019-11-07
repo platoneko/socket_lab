@@ -10,17 +10,23 @@
 int main(int argc,char *argv[]) {
     char opt;
     int port = 80, listenQueue = 32;
-    std::string addr = "INADDR_ANY", root = "/home/cyx/platoneko.github.io/public";
+    std::string addr, root = "/home/cyx/platoneko.github.io/public";
     uint i_addr = INADDR_ANY;
     std::regex IP_PATTERN("((25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]\\d|\\d)\\.){3}(25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]\\d|\\d)");
+    
+    uint i_timeoutVal;
+    TimeVal timeoutVal;
+    timeoutVal.sec = 5;
+    timeoutVal.usec = 0;
 
-    while ((opt=getopt(argc,argv,"hp:r:a:q:"))!=-1) {
+    while ((opt=getopt(argc,argv,"hp:r:a:q:t:"))!=-1) {
         switch (opt) {
           case 'h':
             std::cout << "-h for help\n";
             std::cout << "-p for port\n";
             std::cout << "-d for root directory\n";
-            std::cout << "-a for ip address\n" << std::endl;
+            std::cout << "-a for ip address\n";
+            std::cout << "-t for timeout value (ms)\n" << std::endl;
             exit(0);
           case 'p':
             port = atoi(optarg);
@@ -52,14 +58,19 @@ int main(int argc,char *argv[]) {
                 std::cerr << "非法的队列数目！" << std::endl;
                 exit(-1);
             }
-            break;                                    
+            break;
+          case 't':
+            i_timeoutVal = atoi(optarg);
+            timeoutVal.sec = i_timeoutVal / 1000;
+            timeoutVal.usec = (i_timeoutVal % 1000) * 1000;
+            break;                   
         }
     }
     std::cout << "服务器配置：\n  ip地址: " << addr << "\n";
     std::cout << "  端口: " << port << "\n";
     std::cout << "  根目录: " << root << "\n" << std::endl;
 
-    HttpServer httpServer = HttpServer(i_addr, port, root, listenQueue);
+    HttpServer httpServer = HttpServer(i_addr, port, root, listenQueue, timeoutVal);
     httpServer.run();
     exit(0);
 }
