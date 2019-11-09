@@ -1,20 +1,41 @@
-#include "../include/HttpServer.h"
+#include "../include/HttpServer.hpp"
 #include <getopt.h>
 #include <cstring>
 #include <regex>
 #include <iostream>
+#include "../include/ThreadGuard.hpp"
 
-#define MAXLINE 1024
+#define MAXLINE 4096
 
+enum SignalType {NONE_SIG, RUN_SIG, CLOSE_SIG, EXIT_SIG};
+int signal = NONE_SIG;
+
+void listenThreadRoutine() {
+    char command[MAXLINE];
+    while (1) {
+        scanf("%s", command);
+        if (strcmp(command, "run") == 0) {
+            signal = RUN_SIG;
+        } else if (strcmp(command, "close") == 0) {
+            signal = CLOSE_SIG;
+        } else if (strcmp(command, "exit") == 0) {
+            signal = EXIT_SIG;
+        } else {
+            printf("未定义的命令: %s\n", command);
+            signal = NONE_SIG;
+        }
+        usleep(100*1000);
+    }
+}
 
 int main(int argc,char *argv[]) {
     char opt;
     int port = 80, listenQueue = 32;
-    std::string addr, root = "/home/cyx/platoneko.github.io/public";
+    std::string addr = "INADDR_ANY", root = "/home/cyx/platoneko.github.io/public";
     uint i_addr = INADDR_ANY;
     std::regex IP_PATTERN("((25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]\\d|\\d)\\.){3}(25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]\\d|\\d)");
     
-    uint i_timeoutVal;
+    uint i_timeoutVal = 5000;
     TimeVal timeoutVal;
     timeoutVal.sec = 5;
     timeoutVal.usec = 0;
@@ -68,9 +89,46 @@ int main(int argc,char *argv[]) {
     }
     std::cout << "服务器配置：\n  ip地址: " << addr << "\n";
     std::cout << "  端口: " << port << "\n";
-    std::cout << "  根目录: " << root << "\n" << std::endl;
+    std::cout << "  根目录: " << root << "\n";
+    std::cout << "  持续超时时间: " << i_timeoutVal << "ms\n" << std::endl;
 
     HttpServer httpServer = HttpServer(i_addr, port, root, listenQueue, timeoutVal);
-    httpServer.run();
+
+    std::thread listenThread(listenThreadRoutine);
+    ThreadGuard g(listenThread);
+
+    while (1) {
+      switch (signal)
+      {
+        case NONE_SIG:
+          break;
+        case RUN_SIG:
+          if (httpServer.isRunning()) {
+              printf("FAILURE: 服务器正在运行！\n");
+          } else {
+              httpServer.run();
+              printf("SUCCESS: 服务器启动！\n");              
+          }
+          fflush(stdout);
+          signal = NONE_SIG;
+          break;
+        case CLOSE_SIG:
+          if (httpServer.isRunning()) {
+              httpServer.close_();
+              printf("SUCCESS: 服务器停止运行！\n");
+          } else {
+              printf("FAILURE: 服务器已处于停机状态！\n");              
+          }
+          fflush(stdout);
+          signal = NONE_SIG;
+          break;
+        case EXIT_SIG:
+          printf("SUCCESS: 退出程序！\n");
+          fflush(stdout);
+          exit(0);
+      }
+      usleep(100*1000);
+    }
+
     exit(0);
 }

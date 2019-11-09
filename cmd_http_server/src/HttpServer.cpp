@@ -1,5 +1,5 @@
-#include "../include/HttpServer.h"
-#include "../include/RecvStream.h"
+#include "../include/HttpServer.hpp"
+#include "../include/RecvStream.hpp"
 #include <sys/socket.h>
 #include <netdb.h>
 #include <unistd.h>
@@ -8,36 +8,86 @@
 #include <fcntl.h>
 #include <sys/mman.h>
 #include <thread>
-#include <time.h>
+#include "../include/ThreadGuard.hpp"
 
-#define MAXLINE 1024
+#define MAXLINE 4096
 #define BUFSIZE 8192
 
 
-int HttpServer::run() {
-    int listenfd = _openListenfd();
-
-    auto threadFun = [&](int connfd, char *client_hostname, char *client_port) -> void {
-        _handleRequest(connfd);
-        close(connfd);
-        printf("CLOSE CONNECTION: %s:%s at connfd: %d\n", client_hostname, client_port, connfd);
-    };
-    
-    while (1) {
+void HttpServer::run() {
+    auto runThreadRoutine = [&]() {
         struct sockaddr_storage clientaddr;
         int connfd;
         socklen_t clientlen;
         char client_hostname[MAXLINE], client_port[MAXLINE];
 
-        clientlen = sizeof(struct sockaddr_storage);
-        connfd = accept(listenfd, (struct sockaddr *)&clientaddr, &clientlen);
-        setsockopt(connfd, SOL_SOCKET, SO_RCVTIMEO, &_timeoutVal, sizeof(_timeoutVal));
-        getnameinfo((struct sockaddr *)&clientaddr, clientlen, client_hostname, MAXLINE, 
-                    client_port, MAXLINE, 0);
-        printf("CONNECTION: %s:%s at connfd: %d\n", client_hostname, client_port, connfd);
-        std::thread t(threadFun, connfd, client_hostname, client_port);
-        t.detach();
-    }
+        auto handleThreadRoutine = [&](int connfd) -> void {
+            _handleRequest(connfd);
+            close(connfd);
+            printf("CLOSE CONNECTION: connfd: %d\n", connfd);
+            fflush(stdout);
+        };
+        
+        _listenfd = _openListenfd();
+        _isRunning = true;
+        while (_isRunning) {
+            clientlen = sizeof(struct sockaddr_storage);
+            connfd = accept(_listenfd, (struct sockaddr *)&clientaddr, &clientlen);
+            if (connfd < 0) {
+                printf("Wrong connfd!!!\n");
+                fflush(stdout);
+                exit(-1);
+            }
+            setsockopt(connfd, SOL_SOCKET, SO_RCVTIMEO, &_timeoutVal, sizeof(_timeoutVal));
+            getnameinfo((struct sockaddr *)&clientaddr, clientlen, client_hostname, MAXLINE, 
+                        client_port, MAXLINE, 0);
+            printf("CONNECTION: %s:%s at connfd: %d\n", client_hostname, client_port, connfd);
+            fflush(stdout);
+            std::thread th(handleThreadRoutine, connfd);
+            ThreadGuard g(th);
+            th.detach();
+        }
+        return;
+    };
+    std::thread th(runThreadRoutine);
+    ThreadGuard g(th);
+    th.detach();
+}
+
+/*
+void HttpServer::run() {
+    struct sockaddr_storage clientaddr;
+        int connfd;
+        socklen_t clientlen;
+        char client_hostname[MAXLINE], client_port[MAXLINE];
+
+        auto handleThreadRoutine = [&](int connfd) -> void {
+            _handleRequest(connfd);
+            close(connfd);
+            printf("CLOSE CONNECTION: connfd: %d\n", connfd);
+            fflush(stdout);
+        };
+        
+        _listenfd = _openListenfd();
+        _isRunning = true;
+        while (_isRunning) {
+            clientlen = sizeof(struct sockaddr_storage);
+            connfd = accept(_listenfd, (struct sockaddr *)&clientaddr, &clientlen);
+            setsockopt(connfd, SOL_SOCKET, SO_RCVTIMEO, &_timeoutVal, sizeof(_timeoutVal));
+            getnameinfo((struct sockaddr *)&clientaddr, clientlen, client_hostname, MAXLINE, 
+                        client_port, MAXLINE, 0);
+            printf("CONNECTION: %s:%s at connfd: %d\n", client_hostname, client_port, connfd);
+            fflush(stdout);
+            std::thread th(handleThreadRoutine, connfd);
+            th.detach();
+        }
+        return;
+}
+*/
+
+void HttpServer::close_() {
+    _isRunning = false;
+    close(_listenfd);
 }
 
 int HttpServer::_openListenfd () {
@@ -74,10 +124,9 @@ void HttpServer::_handleRequest(int connfd) {
     char filepath[MAXLINE];
 
     bool persistent;
-    uint n;
 
     RecvStream recvStream = RecvStream(connfd);
-    if ((n = recvStream.bufferedRecvLine(buf, BUFSIZE)) <= 0) {
+    if (recvStream.bufferedRecvLine(buf, BUFSIZE) <= 0) {
         return;
     };
     _readRequestLine(buf, method, uri, version);  // 解析HTTP请求行
@@ -110,6 +159,7 @@ void HttpServer::_handleRequest(int connfd) {
             return;
         };
         printf("%s", buf);
+        fflush(stdout);
         _readRequestLine(buf, method, uri, version);  // 解析HTTP请求行
         _readRequestHeaders(recvStream, persistent);
         _readRequestBody(recvStream);
@@ -138,8 +188,14 @@ void HttpServer::_handleRequest(int connfd) {
 }
 
 void HttpServer::_errorPage(int fd, const char *cause, const char *errnum, const char *shortmsg, const char *longmsg) {
-    char buf[BUFSIZE], body[BUFSIZE], tmp[MAXLINE];
-
+    char buf[BUFSIZE], body[BUFSIZE];
+    
+    sprintf(body, "<html><title>Oops!</title>");
+    sprintf(body, "%s<meta charset=\"utf-8\">\r\n", body);
+    sprintf(body, "%s<body bgcolor=\"ffffff\">\r\n", body);
+    sprintf(body, "%s%s: %s\r\n", body, errnum, shortmsg);
+    sprintf(body, "%s<p>%s: %s\r\n", body, longmsg, cause);
+    /*
     strcpy(body, "<html><title>Oops!</title>");
     strcat(body, "<meta charset=\"utf-8\">\r\n");
     strcat(body, "<body bgcolor=\"ffffff\">\r\n");
@@ -147,23 +203,42 @@ void HttpServer::_errorPage(int fd, const char *cause, const char *errnum, const
     strcat(body, tmp);
     snprintf(tmp, sizeof(tmp), "<p>%s: %s\r\n", longmsg, cause);
     strcat(body, tmp);
+    */
 
     // HTTP响应报文
+    sprintf(buf, "HTTP/1.0 %s %s\r\n", errnum, shortmsg);
+    sprintf(buf, "%sContent-type: text/html\r\n", buf);
+    sprintf(buf, "%sContent-length: %d\r\n\r\n", buf, (int)strlen(body));
+
+    /*
     snprintf(buf, sizeof(buf), "HTTP/1.0 %s %s\r\n", errnum, shortmsg);
     strcat(buf, "Content-type: text/html\r\n");
     snprintf(tmp, sizeof(tmp), "Content-length: %d\r\n\r\n", (int)strlen(body));
     strcat(buf, tmp);
+    */
+
     send(fd, buf, strlen(buf), 0);
     send(fd, body, strlen(body), 0);
-
 }
 
 void HttpServer::_staticResponse(int fd, const char *filepath, int filesize, bool persistent) {
     int srcfd;
-    char MIME[MAXLINE], buf[BUFSIZE], tmp[MAXLINE];
+    char MIME[MAXLINE], buf[BUFSIZE];
     void *srcp;
 
-    _getMIME(filepath, MIME);
+    _getMIME((char *)filepath, MIME);
+
+    sprintf(buf, "HTTP/1.1 200 OK\r\n");
+    sprintf(buf, "%sServer: CYX PC\r\n", buf);
+    if (persistent) {
+        sprintf(buf, "%sConnection: keep-alive\r\n", buf);
+    } else {
+        sprintf(buf, "%sConnection: close\r\n", buf);
+    }
+    sprintf(buf, "%sContent-length: %d\r\n", buf, filesize);
+    sprintf(buf, "%sContent-type: %s\r\n\r\n", buf, MIME);
+
+    /*
     strcpy(buf, "HTTP/1.1 200 OK\r\n");
     strcat(buf, "Server: CYX PC\r\n");
     if (persistent) {
@@ -175,10 +250,13 @@ void HttpServer::_staticResponse(int fd, const char *filepath, int filesize, boo
     strcat(buf, tmp);
     snprintf(tmp, sizeof(tmp), "Content-type: %s\r\n\r\n", MIME);
     strcat(buf, tmp);
+    */
     send(fd, buf, strlen(buf), 0);
     
     srcfd = open(filepath, O_RDONLY, 0);
     if (srcfd < 0) {
+        printf("OPEN ERROR!!!\n");
+        fflush(stdout);
         exit(-1);
     }
     srcp = mmap(0, filesize, PROT_READ, MAP_PRIVATE, srcfd, 0);
@@ -203,7 +281,7 @@ void HttpServer::_getMIME(const char *filepath, char *MIME) {
     else if (strstr(filepath, ".bmp")) 
         strcpy(MIME, "image/bmp");
     else if (strstr(filepath, ".webp")) 
-        strcpy(MIME, "image/webp");
+        strcpy(MIME,"image/webp");
     else if (strstr(filepath, ".ico")) 
         strcpy(MIME, "image/x-icon");
     else
@@ -231,7 +309,7 @@ void HttpServer::_readRequestHeaders(RecvStream &recvStream, bool &persistent) {
     char buf[BUFSIZE];
     persistent = false;
     recvStream.bufferedRecvLine(buf, BUFSIZE);
-    if (strcmp(buf, "Connection: keep-alive\r\n") == 0) {
+    if (strcmp(buf,  "Connection: keep-alive\r\n") == 0) {
         persistent = true;
     }
     while (strcmp(buf, "\r\n")) {
@@ -267,12 +345,13 @@ void HttpServer::_readRequestBody(RecvStream &recvStream) {
 }
 
 void HttpServer::_getFilepath(char *filepath, const char *uri) {
+    int *resultp;
     if (strcmp(uri, "") == 0) {
-        strcpy(filepath, (_root + "index.html").c_str());
+        strcpy(filepath,(_root + "index.html").c_str());
     } else if (uri[strlen(uri)-1] == '/') {
         strcpy(filepath, (_root + uri + "index.html").c_str());
-    } else if (strcmp(uri, "/about") == 0 ||
-               strcmp(uri, "/archives") == 0) {
+    } else if ((strcmp(uri, "/about") == 0) ||
+               (strcmp(uri, "/archives") == 0)) {
         strcpy(filepath, (_root + uri + "/index.html").c_str());
     } else {
         strcpy(filepath, (_root + uri).c_str());

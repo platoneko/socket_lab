@@ -1,4 +1,4 @@
-#include "../include/RecvStream.h"
+#include "../include/RecvStream.hpp"
 #include <sys/socket.h>
 #include <cstring>
 #include <stdio.h>

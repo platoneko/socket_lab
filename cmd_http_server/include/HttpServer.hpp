@@ -1,7 +1,9 @@
 #pragma once
 #include <string>
 #include <netinet/in.h>
-#include "../include/RecvStream.h"
+#include "../include/RecvStream.hpp"
+#include <thread>
+#include <list>
 
 struct TimeVal {
   time_t sec;
@@ -16,11 +18,18 @@ class HttpServer  {
     std::string _root;
     int _listenQueue;
     TimeVal _timeoutVal;
+
+    int _listenfd;
+    bool _isRunning = false;
     
   public:
     HttpServer(uint addr, int port, const std::string &root, int listenQueue, TimeVal timeoutVal):
                _addr(addr), _port(port), _root(root), _listenQueue(listenQueue), _timeoutVal(timeoutVal) {}
-    int run();
+    void run();
+    void close_();
+    bool isRunning() {
+      return _isRunning;
+    }
   private:
     int _openListenfd();
     void _handleRequest(int clientfd);
