@@ -3,7 +3,7 @@
 #include <netinet/in.h>
 #include "../include/RecvStream.hpp"
 #include <thread>
-#include <list>
+#include <vector>
 
 struct TimeVal {
   time_t sec;
@@ -18,14 +18,18 @@ class HttpServer  {
     std::string _root;
     int _listenQueue;
     TimeVal _timeoutVal;
+    int _threadNum;
 
     int _listenfd;
     bool _isRunning = false;
-    
+    std::vector<std::thread> _threadPool;
+
   public:
-    HttpServer(uint addr, int port, const std::string &root, int listenQueue, TimeVal timeoutVal):
-               _addr(addr), _port(port), _root(root), _listenQueue(listenQueue), _timeoutVal(timeoutVal) {}
-    void run();
+    HttpServer(uint addr, int port, const std::string &root, 
+               int listenQueue, TimeVal timeoutVal, int threadNum):
+               _addr(addr), _port(port), _root(root), 
+               _listenQueue(listenQueue), _timeoutVal(timeoutVal), _threadNum(threadNum) {}
+    int run();
     void close_();
     bool isRunning() {
       return _isRunning;

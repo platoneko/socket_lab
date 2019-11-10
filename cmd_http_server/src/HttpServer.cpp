@@ -8,13 +8,13 @@
 #include <fcntl.h>
 #include <sys/mman.h>
 #include <thread>
-#include "../include/ThreadGuard.hpp"
+#include <iostream>
 
 #define MAXLINE 4096
 #define BUFSIZE 8192
 
-
-void HttpServer::run() {
+/*
+int HttpServer::run() {
     auto runThreadRoutine = [&]() {
         struct sockaddr_storage clientaddr;
         int connfd;
@@ -29,14 +29,15 @@ void HttpServer::run() {
         };
         
         _listenfd = _openListenfd();
+        if (_listenfd < 0) {
+            return -1;
+        }
         _isRunning = true;
         while (_isRunning) {
             clientlen = sizeof(struct sockaddr_storage);
-            connfd = accept(_listenfd, (struct sockaddr *)&clientaddr, &clientlen);
+            connfd = accept(_listenfd, (struct sockaddr *)&clientaddr, &clientlen);   
             if (connfd < 0) {
-                printf("Wrong connfd!!!\n");
-                fflush(stdout);
-                exit(-1);
+                continue;
             }
             setsockopt(connfd, SOL_SOCKET, SO_RCVTIMEO, &_timeoutVal, sizeof(_timeoutVal));
             getnameinfo((struct sockaddr *)&clientaddr, clientlen, client_hostname, MAXLINE, 
@@ -44,65 +45,89 @@ void HttpServer::run() {
             printf("CONNECTION: %s:%s at connfd: %d\n", client_hostname, client_port, connfd);
             fflush(stdout);
             std::thread th(handleThreadRoutine, connfd);
-            ThreadGuard g(th);
             th.detach();
         }
-        return;
+        std::cout << "exit ThreadRoutine!" << std::endl;
     };
     std::thread th(runThreadRoutine);
-    ThreadGuard g(th);
     th.detach();
+    return 0;
 }
+*/
 
-/*
-void HttpServer::run() {
-    struct sockaddr_storage clientaddr;
+
+int HttpServer::run() {
+    auto handleThreadRoutine = [&]() -> void {
+        struct sockaddr_storage clientaddr;
         int connfd;
         socklen_t clientlen;
         char client_hostname[MAXLINE], client_port[MAXLINE];
-
-        auto handleThreadRoutine = [&](int connfd) -> void {
-            _handleRequest(connfd);
-            close(connfd);
-            printf("CLOSE CONNECTION: connfd: %d\n", connfd);
-            fflush(stdout);
-        };
-        
-        _listenfd = _openListenfd();
-        _isRunning = true;
         while (_isRunning) {
             clientlen = sizeof(struct sockaddr_storage);
             connfd = accept(_listenfd, (struct sockaddr *)&clientaddr, &clientlen);
+            if (connfd < 0) {
+                continue;
+            }
             setsockopt(connfd, SOL_SOCKET, SO_RCVTIMEO, &_timeoutVal, sizeof(_timeoutVal));
             getnameinfo((struct sockaddr *)&clientaddr, clientlen, client_hostname, MAXLINE, 
                         client_port, MAXLINE, 0);
             printf("CONNECTION: %s:%s at connfd: %d\n", client_hostname, client_port, connfd);
             fflush(stdout);
-            std::thread th(handleThreadRoutine, connfd);
-            th.detach();
+            _handleRequest(connfd);
+            close(connfd);
+            printf("CLOSE CONNECTION: connfd: %d\n", connfd);
+            fflush(stdout);
         }
-        return;
+    };
+    
+    _listenfd = _openListenfd();
+    if (_listenfd < 0) {
+        return -1;
+    }
+    _isRunning = true;
+    for (int i=0; i<_threadNum; ++i) {
+        _threadPool.emplace_back(handleThreadRoutine);
+    }
+    return 0;
+}
+
+/*
+void HttpServer::close_() {
+    _isRunning = false;
+    close(_listenfd);
 }
 */
 
 void HttpServer::close_() {
     _isRunning = false;
+    int i = 0;
+    for (auto it = _threadPool.begin(), end = _threadPool.end(); 
+         it != end; ++it, ++i) {
+        (*it).join();
+        std::cout << "exit ThreadRoutine " << i << "!" << std::endl;
+    }
     close(_listenfd);
+    _threadPool.clear();
 }
 
 int HttpServer::_openListenfd () {
     int listenfd, optval=1;
     struct sockaddr_in serveraddr;
+
+    TimeVal timeoutVal;
+    timeoutVal.sec = 5;
+    timeoutVal.usec = 0;
   
     /* Create a socket descriptor */
     if ((listenfd = socket(AF_INET, SOCK_STREAM, 0)) < 0)
-	return -1;
+	    return -1;
  
     /* Eliminates "Address already in use" error from bind. */
     if (setsockopt(listenfd, SOL_SOCKET, SO_REUSEADDR, 
 		   (const void *)&optval , sizeof(int)) < 0)
-	return -1;
+	    return -1;
 
+    setsockopt(listenfd, SOL_SOCKET, SO_RCVTIMEO, &timeoutVal, sizeof(timeoutVal));
     /* Listenfd will be an endpoint for all requests to port
        on any IP address for this host */
     serveraddr.sin_family = AF_INET; 
@@ -345,7 +370,6 @@ void HttpServer::_readRequestBody(RecvStream &recvStream) {
 }
 
 void HttpServer::_getFilepath(char *filepath, const char *uri) {
-    int *resultp;
     if (strcmp(uri, "") == 0) {
         strcpy(filepath,(_root + "index.html").c_str());
     } else if (uri[strlen(uri)-1] == '/') {

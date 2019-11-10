@@ -40,14 +40,17 @@ int main(int argc,char *argv[]) {
     timeoutVal.sec = 5;
     timeoutVal.usec = 0;
 
-    while ((opt=getopt(argc,argv,"hp:r:a:q:t:"))!=-1) {
+    int threadNum = 32;
+
+    while ((opt=getopt(argc,argv,"hp:r:a:q:t:T:"))!=-1) {
         switch (opt) {
           case 'h':
             std::cout << "-h for help\n";
             std::cout << "-p for port\n";
             std::cout << "-d for root directory\n";
             std::cout << "-a for ip address\n";
-            std::cout << "-t for timeout value (ms)\n" << std::endl;
+            std::cout << "-t for timeout value (ms)\n";
+            std::cout << "-T for thread number\n" << std::endl;
             exit(0);
           case 'p':
             port = atoi(optarg);
@@ -80,6 +83,13 @@ int main(int argc,char *argv[]) {
                 exit(-1);
             }
             break;
+          case 'T':
+            threadNum = atoi(optarg);
+            if (threadNum <= 1) {
+                std::cerr << "非法的队列数目！" << std::endl;
+                exit(-1);
+            }
+            break;
           case 't':
             i_timeoutVal = atoi(optarg);
             timeoutVal.sec = i_timeoutVal / 1000;
@@ -90,9 +100,10 @@ int main(int argc,char *argv[]) {
     std::cout << "服务器配置：\n  ip地址: " << addr << "\n";
     std::cout << "  端口: " << port << "\n";
     std::cout << "  根目录: " << root << "\n";
-    std::cout << "  持续超时时间: " << i_timeoutVal << "ms\n" << std::endl;
+    std::cout << "  持续连接超时: " << i_timeoutVal << "ms\n";
+    std::cout << "  线程数: " << threadNum << "\n" << std::endl;
 
-    HttpServer httpServer = HttpServer(i_addr, port, root, listenQueue, timeoutVal);
+    HttpServer httpServer = HttpServer(i_addr, port, root, listenQueue, timeoutVal, threadNum);
 
     std::thread listenThread(listenThreadRoutine);
     ThreadGuard g(listenThread);
@@ -106,8 +117,11 @@ int main(int argc,char *argv[]) {
           if (httpServer.isRunning()) {
               printf("FAILURE: 服务器正在运行！\n");
           } else {
-              httpServer.run();
-              printf("SUCCESS: 服务器启动！\n");              
+              if (httpServer.run() == 0) {
+                  printf("SUCCESS: 服务器启动！\n");                                
+              } else {
+                  printf("FAILURE: 服务器启动失败！\n");
+              }
           }
           fflush(stdout);
           signal = NONE_SIG;
