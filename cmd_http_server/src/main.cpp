@@ -7,11 +7,15 @@
 
 #define MAXLINE 4096
 
-enum SignalType {NONE_SIG, RUN_SIG, CLOSE_SIG, EXIT_SIG};
+enum SignalType {NONE_SIG, RUN_SIG, CLOSE_SIG, SET_SIG, EXIT_SIG};
 int signal = NONE_SIG;
 
+char command[MAXLINE];
+char key[MAXLINE];
+char value[MAXLINE];
+
+
 void listenThreadRoutine() {
-    char command[MAXLINE];
     while (1) {
         scanf("%s", command);
         if (strcmp(command, "run") == 0) {
@@ -20,6 +24,10 @@ void listenThreadRoutine() {
             signal = CLOSE_SIG;
         } else if (strcmp(command, "exit") == 0) {
             signal = EXIT_SIG;
+        } else if (strcmp(command, "set") == 0) {
+            scanf("%s", key);
+            scanf("%s", value);
+            signal = SET_SIG;
         } else {
             printf("未定义的命令: %s\n", command);
             signal = NONE_SIG;
@@ -35,7 +43,7 @@ int main(int argc,char *argv[]) {
     uint i_addr = INADDR_ANY;
     std::regex IP_PATTERN("((25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]\\d|\\d)\\.){3}(25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]\\d|\\d)");
     
-    uint i_timeoutVal = 5000;
+    int i_timeoutVal = 5000;
     TimeVal timeoutVal;
     timeoutVal.sec = 5;
     timeoutVal.usec = 0;
@@ -78,20 +86,24 @@ int main(int argc,char *argv[]) {
             break;
           case 'q':
             listenQueue = atoi(optarg);
-            if (listenQueue <= 1) {
+            if (listenQueue < 1) {
                 std::cerr << "非法的队列数目！" << std::endl;
                 exit(-1);
             }
             break;
           case 'T':
             threadNum = atoi(optarg);
-            if (threadNum <= 1) {
-                std::cerr << "非法的队列数目！" << std::endl;
+            if (threadNum < 1) {
+                std::cerr << "非法的线程数目！" << std::endl;
                 exit(-1);
             }
             break;
           case 't':
             i_timeoutVal = atoi(optarg);
+            if (i_timeoutVal < 100) {
+                std::cerr << "非法的超时时间！" << std::endl;
+                exit(-1);
+            }
             timeoutVal.sec = i_timeoutVal / 1000;
             timeoutVal.usec = (i_timeoutVal % 1000) * 1000;
             break;                   
@@ -136,10 +148,77 @@ int main(int argc,char *argv[]) {
           fflush(stdout);
           signal = NONE_SIG;
           break;
+        case SET_SIG:
+          {
+              if (httpServer.isRunning()) {
+                  printf("FAILURE: 服务器正在运行！\n");
+                  fflush(stdout);
+                  signal = NONE_SIG;
+                  break;
+              }
+              if (strcmp(key, "port") == 0) {
+                  port = atoi(value);
+                  if (port < 0 || port > 0xffff) {
+                      printf("FAILURE: 非法的端口号！\n");              
+                  } else {
+                      httpServer.setPort(port);
+                      printf("SUCCESS: 当前端口号 %d\n", port);
+                  }
+              } else if (strcmp(key, "addr") == 0) {
+                  addr = std::string(value); 
+                  std::smatch match;
+                  if (!regex_match(addr, match, IP_PATTERN)) {
+                      printf("FAILURE: 非法的ip地址！\n");
+                  } else {
+                      i_addr = (stoi(match.str(1)) << 24) + 
+                               (stoi(match.str(2)) << 16) + 
+                               (stoi(match.str(3)) << 8) + 
+                                stoi(match.str(4));
+                      httpServer.setAddr(i_addr);
+                      printf("SUCCESS: 当前ip地址 %s\n", value);
+                  }  
+              } else if (strcmp(key, "root") == 0) {
+                  root = std::string(value);
+                  httpServer.setRoot(root);
+                  printf("SUCCESS: 当前root路径 %s\n", value);
+              } else if (strcmp(key, "timeout") == 0) {
+                  i_timeoutVal = atoi(value);
+                  if (i_timeoutVal < 100) {
+                      printf("FAILURE: 非法的超时时间！\n");
+                  } else {
+                      timeoutVal.sec = i_timeoutVal / 1000;
+                      timeoutVal.usec = (i_timeoutVal % 1000) * 1000;
+                      httpServer.setTimeoutVal(timeoutVal);
+                      printf("SUCCESS: 当前超时时间 %dms\n", i_timeoutVal);
+                  }
+              } else if (strcmp(key, "queue") == 0) {
+                  listenQueue = atoi(value);
+                  if (listenQueue < 1) {
+                      printf("FAILURE: 非法的队列数目！\n");
+                  } else {
+                      httpServer.setListenQueue(listenQueue);
+                      printf("SUCCESS: 当前队列数 %d\n", listenQueue);
+                  }
+              } else if (strcmp(key, "thread") == 0) {
+                  threadNum = atoi(value);
+                  if (threadNum < 1) {
+                      printf("FAILURE: 非法的队列数目！\n");
+                  } else {
+                      httpServer.setThreadNum(threadNum);
+                      printf("SUCCESS: 当前线程数 %d\n", threadNum);
+                  }
+              } else {
+                  printf("FAILURE: 未定义的命令 %s\n", key);   
+              }
+              fflush(stdout);
+              signal = NONE_SIG;              
+              break;
+          }
         case EXIT_SIG:
           printf("SUCCESS: 退出程序！\n");
           fflush(stdout);
           exit(0);
+          break;
       }
       usleep(100*1000);
     }

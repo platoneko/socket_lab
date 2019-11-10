@@ -34,6 +34,13 @@ class HttpServer  {
     bool isRunning() {
       return _isRunning;
     }
+    void setAddr(uint addr) { _addr = addr; }
+    void setPort(int port) { _port = port; }
+    void setRoot(const std::string &root) { _root = root; }
+    void setListenQueue(int listenQueue) { _listenQueue = listenQueue; }
+    void setTimeoutVal(TimeVal timeoutVal) { _timeoutVal = timeoutVal; }
+    void setThreadNum(int threadNum) { _threadNum = threadNum; }
+
   private:
     int _openListenfd();
     void _handleRequest(int clientfd);
