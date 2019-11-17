@@ -8,6 +8,7 @@
 #include <fcntl.h>
 #include <sys/mman.h>
 #include <thread>
+#include <regex>
 // #include <QMutex>
 
 #define MAXLINE 4096
@@ -23,11 +24,15 @@ HttpServer::HttpServer(QWidget *parent)
 {
     ui->setupUi(this);
 
-    _addr = INADDR_ANY;
+    _i_addr = INADDR_ANY;
+    _addr = "INADDR_ANY";
+
     _port = 23333;
     _root = "/home/cyx/platoneko.github.io/public";
     _threadNum = 32;
     _listenQueue = 32;
+
+    _i_timeoutVal = 5000;
     _timeoutVal.sec = 5;
     _timeoutVal.usec = 0;
 
@@ -128,7 +133,7 @@ int HttpServer::_openListenfd () {
     /* Listenfd will be an endpoint for all requests to port
        on any IP address for this host */
     serveraddr.sin_family = AF_INET;
-    serveraddr.sin_addr.s_addr = htonl(_addr);
+    serveraddr.sin_addr.s_addr = htonl(_i_addr);
     serveraddr.sin_port = htons((unsigned short)_port);
     if (bind(listenfd, (struct sockaddr *)&serveraddr, sizeof(serveraddr)) < 0)
     return -1;
@@ -404,13 +409,20 @@ void HttpServer::on_runButton_clicked()
         if (run() == 0) {
             // printf("SUCCESS: 服务器启动！\n");
             // mtx_w.tryLock();
-            msg.sprintf("SUCCESS: 服务器启动！\n");
+            msg.sprintf("SUCCESS: 服务器启动！\n"
+                        "IP: %s\n"
+                        "Port: %d\n"
+                        "Root: %s\n"
+                        "Listen Queue: %d\n"
+                        "Thread Num: %d\n"
+                        "Timeout: %d(ms)\n\n",
+                        _addr.c_str(), _port, _root.c_str(), _listenQueue, _threadNum, _i_timeoutVal);
             emit msgSignal(msg);
             //  mtx_r.unlock();
         } else {
             // printf("FAILURE: 服务器启动失败！\n");
             // mtx_w.tryLock();
-            msg.sprintf("FAILURE: 服务器启动失败！\n");
+            msg.sprintf("FAILURE: 服务器启动失败！\n\n");
             emit msgSignal(msg);
             // mtx_r.unlock();
         }
@@ -436,14 +448,104 @@ void HttpServer::on_closeButton_clicked()
         close_();
         // printf("SUCCESS: 服务器停止运行！\n");
         // mtx_w.tryLock();
-        msg.sprintf("SUCCESS: 服务器停止运行！\n");
+        msg.sprintf("SUCCESS: 服务器停止运行！\n\n");
         emit msgSignal(msg);
         // mtx_r.unlock();
         } else {
             // printf("FAILURE: 服务器已处于停机状态！\n");
             // mtx_w.tryLock();
-            msg.sprintf("FAILURE: 服务器已处于停机状态！\n");
+            msg.sprintf("FAILURE: 服务器已处于停机状态！\n\n");
             emit msgSignal(msg);
             // mtx_r.unlock();
         }
+}
+
+void HttpServer::on_resetButton_clicked()
+{
+    QString msg;
+
+    if (_isRunning) {
+        msg.sprintf("FAILURE: 服务器正在运行！\n");
+        emit msgSignal(msg);
+        return;
+    }
+
+    std::string addr;
+    uint i_addr;
+    int port;
+    std::string root;
+    int listenQueue;
+    TimeVal timeoutVal;
+    int i_timeoutVal;
+    int threadNum;
+
+    addr = ui->ipEdit->text().toStdString();
+    if (addr == "0.0.0.0") {
+        i_addr = INADDR_ANY;
+        addr = "INADDR_ANY";
+    } else {
+        std::smatch match;
+        std::regex IP_PATTERN("(25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]\\d|\\d)\\."
+                              "(25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]\\d|\\d)\\."
+                              "(25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]\\d|\\d)\\."
+                              "(25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]\\d|\\d)");
+        if (!regex_match(addr, match, IP_PATTERN)) {
+            msg.sprintf("FAILURE: 非法的ip地址！\n");
+            emit msgSignal(msg);
+            return;
+        } else {
+            // std::cout << match.str(1) << "." << match.str(2) << "." << match.str(3) << "." << match.str(4) << std::endl;
+            i_addr = (std::stoi(match.str(1)) << 24) +
+                     (std::stoi(match.str(2)) << 16) +
+                     (std::stoi(match.str(3)) << 8) +
+                      std::stoi(match.str(4));
+            // printf("ip: %x\n", i_addr);
+            // fflush(stdout);
+        }
+    }
+
+    port = ui->portEdit->text().toInt();
+    if (port < 0 || port > 0xffff) {
+        msg.sprintf("FAILURE: 非法的端口号！\n");
+        emit msgSignal(msg);
+        return;
+    }
+
+    root = ui->rootEdit->text().toStdString();
+
+    listenQueue = ui->listenQueueEdit->text().toInt();
+    if (listenQueue < 1) {
+        msg.sprintf("FAILURE: 非法的线程数目！\n");
+        emit msgSignal(msg);
+        return;
+    }
+
+    threadNum = ui->threadEdit->text().toInt();
+    if (threadNum < 1) {
+        msg.sprintf("FAILURE: 非法的队列数目！\n");
+        emit msgSignal(msg);
+        return;
+    }
+
+    i_timeoutVal = ui->timeoutEdit->text().toInt();
+    if (i_timeoutVal < 100) {
+        msg.sprintf("FAILURE: 非法的超时时间！\n");
+        emit msgSignal(msg);
+        return;
+    } else {
+        timeoutVal.sec = i_timeoutVal / 1000;
+        timeoutVal.usec = (i_timeoutVal % 1000) * 1000;
+    }
+
+    _addr = addr;
+    _i_addr = i_addr;
+    _port = port;
+    _root = root;
+    _listenQueue = listenQueue;
+    _timeoutVal = timeoutVal;
+    _i_timeoutVal = i_timeoutVal;
+    _threadNum = threadNum;
+
+    msg.sprintf("SUCCESS: 参数设置成功！\n");
+    emit msgSignal(msg);
 }

@@ -45,14 +45,18 @@ private slots:
 
     void on_closeButton_clicked();
 
+    void on_resetButton_clicked();
+
 private:
     Ui::HttpServer *ui;
 
-    uint _addr;
+    uint _i_addr;
+    std::string _addr;
     int _port;
     std::string _root;
     int _listenQueue;
     TimeVal _timeoutVal;
+    int _i_timeoutVal;
     int _threadNum;
 
     int _listenfd;

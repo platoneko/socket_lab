@@ -41,7 +41,10 @@ int main(int argc,char *argv[]) {
     int port = 80, listenQueue = 32;
     std::string addr = "INADDR_ANY", root = "/home/cyx/platoneko.github.io/public";
     uint i_addr = INADDR_ANY;
-    std::regex IP_PATTERN("((25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]\\d|\\d)\\.){3}(25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]\\d|\\d)");
+    std::regex IP_PATTERN("(25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]\\d|\\d)\\."
+                          "(25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]\\d|\\d)\\."
+                          "(25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]\\d|\\d)\\."
+                          "(25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]\\d|\\d)");
     
     int i_timeoutVal = 5000;
     TimeVal timeoutVal;
@@ -202,7 +205,7 @@ int main(int argc,char *argv[]) {
               } else if (strcmp(key, "thread") == 0) {
                   threadNum = atoi(value);
                   if (threadNum < 1) {
-                      printf("FAILURE: 非法的队列数目！\n");
+                      printf("FAILURE: 非法的线程数目！\n");
                   } else {
                       httpServer.setThreadNum(threadNum);
                       printf("SUCCESS: 当前线程数 %d\n", threadNum);
