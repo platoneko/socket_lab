@@ -5,3 +5,4 @@
 *lib/*
 */Makefile
 .vscode/*
+build-ui_http_server-Desktop-Debug/*

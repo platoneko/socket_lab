@@ -1,5 +1,5 @@
-#include "../include/HttpServer.hpp"
-#include "../include/RecvStream.hpp"
+#include "HttpServer.h"
+#include "./ui_HttpServer.h"
 #include <sys/socket.h>
 #include <netdb.h>
 #include <unistd.h>
@@ -8,53 +8,38 @@
 #include <fcntl.h>
 #include <sys/mman.h>
 #include <thread>
-#include <iostream>
+// #include <QMutex>
 
 #define MAXLINE 4096
 #define BUFSIZE 8192
 
-/*
-int HttpServer::run() {
-    auto runThreadRoutine = [&]() {
-        struct sockaddr_storage clientaddr;
-        int connfd;
-        socklen_t clientlen;
-        char client_hostname[MAXLINE], client_port[MAXLINE];
+// static QMutex mtx_w;
+// static QMutex mtx_r;
 
-        auto handleThreadRoutine = [&](int connfd) -> void {
-            _handleRequest(connfd);
-            close(connfd);
-            printf("CLOSE CONNECTION: connfd: %d\n", connfd);
-            fflush(stdout);
-        };
-        
-        _listenfd = _openListenfd();
-        if (_listenfd < 0) {
-            return -1;
-        }
-        _isRunning = true;
-        while (_isRunning) {
-            clientlen = sizeof(struct sockaddr_storage);
-            connfd = accept(_listenfd, (struct sockaddr *)&clientaddr, &clientlen);   
-            if (connfd < 0) {
-                continue;
-            }
-            setsockopt(connfd, SOL_SOCKET, SO_RCVTIMEO, &_timeoutVal, sizeof(_timeoutVal));
-            getnameinfo((struct sockaddr *)&clientaddr, clientlen, client_hostname, MAXLINE, 
-                        client_port, MAXLINE, 0);
-            printf("CONNECTION: %s:%s at connfd: %d\n", client_hostname, client_port, connfd);
-            fflush(stdout);
-            std::thread th(handleThreadRoutine, connfd);
-            th.detach();
-        }
-        std::cout << "exit ThreadRoutine!" << std::endl;
-    };
-    std::thread th(runThreadRoutine);
-    th.detach();
-    return 0;
+
+HttpServer::HttpServer(QWidget *parent)
+    : QMainWindow(parent)
+    , ui(new Ui::HttpServer)
+{
+    ui->setupUi(this);
+
+    _addr = INADDR_ANY;
+    _port = 23333;
+    _root = "/home/cyx/platoneko.github.io/public";
+    _threadNum = 32;
+    _listenQueue = 32;
+    _timeoutVal.sec = 5;
+    _timeoutVal.usec = 0;
+
+    _isRunning = false;
+
+    connect(this, SIGNAL(msgSignal(QString)), this, SLOT(printMsg(QString)), Qt::QueuedConnection);
 }
-*/
 
+HttpServer::~HttpServer()
+{
+    delete ui;
+}
 
 int HttpServer::run() {
     auto handleThreadRoutine = [&]() -> void {
@@ -62,6 +47,8 @@ int HttpServer::run() {
         int connfd;
         socklen_t clientlen;
         char client_hostname[MAXLINE], client_port[MAXLINE];
+
+        QString msg;
         while (_isRunning) {
             clientlen = sizeof(struct sockaddr_storage);
             connfd = accept(_listenfd, (struct sockaddr *)&clientaddr, &clientlen);
@@ -69,17 +56,26 @@ int HttpServer::run() {
                 continue;
             }
             setsockopt(connfd, SOL_SOCKET, SO_RCVTIMEO, &_timeoutVal, sizeof(_timeoutVal));
-            getnameinfo((struct sockaddr *)&clientaddr, clientlen, client_hostname, MAXLINE, 
+            getnameinfo((struct sockaddr *)&clientaddr, clientlen, client_hostname, MAXLINE,
                         client_port, MAXLINE, 0);
             printf("CONNECTION: %s:%s at connfd: %d\n", client_hostname, client_port, connfd);
-            fflush(stdout);
+
+            // mtx_w.tryLock();
+            msg.sprintf("CONNECTION: %s:%s at connfd: %d\n", client_hostname, client_port, connfd);
+            emit msgSignal(msg);
+            // mtx_r.unlock();
+
             _handleRequest(connfd);
-            close(connfd);
+            ::close(connfd);
             printf("CLOSE CONNECTION: connfd: %d\n", connfd);
-            fflush(stdout);
+
+            // mtx_w.tryLock();
+            msg.sprintf("CLOSE CONNECTION: connfd: %d\n", connfd);
+            emit msgSignal(msg);
+            // mtx_r.unlock();
         }
     };
-    
+
     _listenfd = _openListenfd();
     if (_listenfd < 0) {
         return -1;
@@ -91,22 +87,23 @@ int HttpServer::run() {
     return 0;
 }
 
-/*
-void HttpServer::close_() {
-    _isRunning = false;
-    close(_listenfd);
-}
-*/
-
 void HttpServer::close_() {
     _isRunning = false;
     int i = 0;
-    for (auto it = _threadPool.begin(), end = _threadPool.end(); 
+    QString msg;
+    for (auto it = _threadPool.begin(), end = _threadPool.end();
          it != end; ++it, ++i) {
         (*it).join();
-        std::cout << "exit ThreadRoutine " << i << "!" << std::endl;
+        printf("exit ThreadRoutine %d\n", i);
+        // msg.sprintf("exit ThreadRoutine %d\n", i);
+        // emit msgSignal();
     }
-    close(_listenfd);
+    // mtx_w.tryLock();
+    msg.sprintf("Exit All ThreadRoutine!\n");
+    emit msgSignal(msg);
+    // mtx_r.unlock();
+
+    ::close(_listenfd);
     _threadPool.clear();
 }
 
@@ -117,28 +114,28 @@ int HttpServer::_openListenfd () {
     TimeVal timeoutVal;
     timeoutVal.sec = 5;
     timeoutVal.usec = 0;
-  
+
     /* Create a socket descriptor */
     if ((listenfd = socket(AF_INET, SOCK_STREAM, 0)) < 0)
-	    return -1;
- 
+        return -1;
+
     /* Eliminates "Address already in use" error from bind. */
-    if (setsockopt(listenfd, SOL_SOCKET, SO_REUSEADDR, 
-		   (const void *)&optval , sizeof(int)) < 0)
-	    return -1;
+    if (setsockopt(listenfd, SOL_SOCKET, SO_REUSEADDR,
+           (const void *)&optval , sizeof(int)) < 0)
+        return -1;
 
     setsockopt(listenfd, SOL_SOCKET, SO_RCVTIMEO, &timeoutVal, sizeof(timeoutVal));
     /* Listenfd will be an endpoint for all requests to port
        on any IP address for this host */
-    serveraddr.sin_family = AF_INET; 
-    serveraddr.sin_addr.s_addr = htonl(_addr); 
-    serveraddr.sin_port = htons((unsigned short)_port); 
+    serveraddr.sin_family = AF_INET;
+    serveraddr.sin_addr.s_addr = htonl(_addr);
+    serveraddr.sin_port = htons((unsigned short)_port);
     if (bind(listenfd, (struct sockaddr *)&serveraddr, sizeof(serveraddr)) < 0)
-	return -1;
+    return -1;
 
     /* Make it a listening socket ready to accept connection requests */
     if (listen(listenfd, _listenQueue) < 0)
-	return -1;
+    return -1;
     return listenfd;
 }
 
@@ -150,60 +147,72 @@ void HttpServer::_handleRequest(int connfd) {
 
     bool persistent;
 
+    QString msg;
+
     RecvStream recvStream = RecvStream(connfd);
     if (recvStream.bufferedRecvLine(buf, BUFSIZE) <= 0) {
         return;
-    };
+    }
+
+    // mtx_w.tryLock();
+    msg.sprintf("%s", buf);
+    emit msgSignal(msg);
+    // mtx_r.unlock();
+
     _readRequestLine(buf, method, uri, version);  // 解析HTTP请求行
     _readRequestHeaders(recvStream, persistent);
     _readRequestBody(recvStream);
 
-    if (strcmp(method, "GET") != 0) {  // 线程安全?
-        _errorPage(connfd, method, "501", "Not implemented", 
+    if (strcmp(method, "GET") != 0) {
+        _errorPage(connfd, method, "501", "Not implemented",
                    "本辣鸡不提供这种服务！");
         return;
     }
-    
+
     _getFilepath(filepath, uri);
     if (stat(filepath, &sbuf) < 0) {
-        _errorPage(connfd, uri, "404", "Not found", 
+        _errorPage(connfd, uri, "404", "Not found",
                    "垃圾堆里没有这个文件！");
         return;
     }
 
     if (!(S_ISREG(sbuf.st_mode)) || !(S_IRUSR & sbuf.st_mode)) {
-        _errorPage(connfd, uri, "403", "Forbidden", 
+        _errorPage(connfd, uri, "403", "Forbidden",
                    "无权访问！");
         return;
     } else {
         _staticResponse(connfd, filepath, sbuf.st_size, persistent);
     }
-    
+
     while (persistent) {
         if (recvStream.bufferedRecvLine(buf, BUFSIZE) <= 0) {
             return;
         };
-        printf("%s", buf);
-        fflush(stdout);
+
+        // mtx_w.tryLock();
+        msg.sprintf("%s", buf);
+        emit msgSignal(msg);
+        // mtx_r.unlock();
+
         _readRequestLine(buf, method, uri, version);  // 解析HTTP请求行
         _readRequestHeaders(recvStream, persistent);
         _readRequestBody(recvStream);
 
         if (strcmp(method, "GET") != 0) {  // 线程安全?
-            _errorPage(connfd, method, "501", "Not implemented", 
+            _errorPage(connfd, method, "501", "Not implemented",
                         "本辣鸡不提供这种服务！");
             return;
         }
-    
+
         _getFilepath(filepath, uri);
         if (stat(filepath, &sbuf) < 0) {
-            _errorPage(connfd, uri, "404", "Not found", 
+            _errorPage(connfd, uri, "404", "Not found",
                     "垃圾堆里没有这个文件！");
             return;
         }
 
         if (!(S_ISREG(sbuf.st_mode)) || !(S_IRUSR & sbuf.st_mode)) {
-            _errorPage(connfd, uri, "403", "Forbidden", 
+            _errorPage(connfd, uri, "403", "Forbidden",
                     "无权访问！");
             return;
         } else {
@@ -214,7 +223,7 @@ void HttpServer::_handleRequest(int connfd) {
 
 void HttpServer::_errorPage(int fd, const char *cause, const char *errnum, const char *shortmsg, const char *longmsg) {
     char buf[BUFSIZE], body[BUFSIZE];
-    
+
     sprintf(body, "<html><title>Oops!</title>");
     sprintf(body, "%s<meta charset=\"utf-8\">\r\n", body);
     sprintf(body, "%s<body bgcolor=\"ffffff\">\r\n", body);
@@ -277,7 +286,7 @@ void HttpServer::_staticResponse(int fd, const char *filepath, int filesize, boo
     strcat(buf, tmp);
     */
     send(fd, buf, strlen(buf), 0);
-    
+
     srcfd = open(filepath, O_RDONLY, 0);
     if (srcfd < 0) {
         printf("OPEN ERROR!!!\n");
@@ -285,29 +294,29 @@ void HttpServer::_staticResponse(int fd, const char *filepath, int filesize, boo
         exit(-1);
     }
     srcp = mmap(0, filesize, PROT_READ, MAP_PRIVATE, srcfd, 0);
-    close(srcfd);
+    ::close(srcfd);
     send(fd, srcp, filesize, 0);
     munmap(srcp, filesize);
 }
 
 void HttpServer::_getMIME(const char *filepath, char *MIME) {
-    if (strstr(filepath, ".html")) 
+    if (strstr(filepath, ".html"))
         strcpy(MIME, "text/html");
-    else if (strstr(filepath, ".css")) 
+    else if (strstr(filepath, ".css"))
         strcpy(MIME, "text/css");
-    else if (strstr(filepath, ".js")) 
+    else if (strstr(filepath, ".js"))
         strcpy(MIME, "text/javascript");
-    else if (strstr(filepath, ".gif")) 
+    else if (strstr(filepath, ".gif"))
         strcpy(MIME, "image/gif");
-    else if (strstr(filepath, ".png")) 
+    else if (strstr(filepath, ".png"))
         strcpy(MIME, "image/png");
-    else if (strstr(filepath, ".jpg")) 
+    else if (strstr(filepath, ".jpg"))
         strcpy(MIME, "image/jpeg");
-    else if (strstr(filepath, ".bmp")) 
+    else if (strstr(filepath, ".bmp"))
         strcpy(MIME, "image/bmp");
-    else if (strstr(filepath, ".webp")) 
+    else if (strstr(filepath, ".webp"))
         strcpy(MIME,"image/webp");
-    else if (strstr(filepath, ".ico")) 
+    else if (strstr(filepath, ".ico"))
         strcpy(MIME, "image/x-icon");
     else
         strcpy(MIME, "text/plain");
@@ -359,7 +368,7 @@ void HttpServer::_readRequestBody(RecvStream &recvStream) {
         recvStream.bufferedRecv(buf, BUFSIZE);
         while (!recvStream.recvEOF()) {
             recvStream.bufferedRecv(buf, BUFSIZE);
-        } 
+        }
         if (recvStream.isEmpty()) {
             return;
         } else {
@@ -380,4 +389,61 @@ void HttpServer::_getFilepath(char *filepath, const char *uri) {
     } else {
         strcpy(filepath, (_root + uri).c_str());
     }
+}
+
+void HttpServer::on_runButton_clicked()
+{
+    QString msg;
+    if (_isRunning) {
+        // printf("FAILURE: 服务器正在运行！\n");
+        // mtx_w.tryLock();
+        msg.sprintf("FAILURE: 服务器正在运行！\n");
+        emit msgSignal(msg);
+        // mtx_r.unlock();
+    } else {
+        if (run() == 0) {
+            // printf("SUCCESS: 服务器启动！\n");
+            // mtx_w.tryLock();
+            msg.sprintf("SUCCESS: 服务器启动！\n");
+            emit msgSignal(msg);
+            //  mtx_r.unlock();
+        } else {
+            // printf("FAILURE: 服务器启动失败！\n");
+            // mtx_w.tryLock();
+            msg.sprintf("FAILURE: 服务器启动失败！\n");
+            emit msgSignal(msg);
+            // mtx_r.unlock();
+        }
+    }
+}
+
+void HttpServer::on_exitButton_clicked()
+{
+    printf("SUCCESS: 退出程序！\n");
+    QApplication::exit(0);
+}
+
+void HttpServer::printMsg(QString msg) {
+    // mtx_r.tryLock();
+    ui->logBrowser->insertPlainText(msg);
+    // mtx_w.unlock();
+}
+
+void HttpServer::on_closeButton_clicked()
+{
+    QString msg;
+    if (_isRunning) {
+        close_();
+        // printf("SUCCESS: 服务器停止运行！\n");
+        // mtx_w.tryLock();
+        msg.sprintf("SUCCESS: 服务器停止运行！\n");
+        emit msgSignal(msg);
+        // mtx_r.unlock();
+        } else {
+            // printf("FAILURE: 服务器已处于停机状态！\n");
+            // mtx_w.tryLock();
+            msg.sprintf("FAILURE: 服务器已处于停机状态！\n");
+            emit msgSignal(msg);
+            // mtx_r.unlock();
+        }
 }
