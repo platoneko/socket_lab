@@ -215,32 +215,18 @@ void HttpServer::_handleRequest(int connfd) {
 void HttpServer::_errorPage(int fd, const char *cause, const char *errnum, const char *shortmsg, const char *longmsg) {
     char buf[BUFSIZE], body[BUFSIZE];
     
-    sprintf(body, "<html><title>Oops!</title>");
-    sprintf(body, "%s<meta charset=\"utf-8\">\r\n", body);
-    sprintf(body, "%s<body bgcolor=\"ffffff\">\r\n", body);
-    sprintf(body, "%s%s: %s\r\n", body, errnum, shortmsg);
-    sprintf(body, "%s<p>%s: %s\r\n", body, longmsg, cause);
-    /*
-    strcpy(body, "<html><title>Oops!</title>");
-    strcat(body, "<meta charset=\"utf-8\">\r\n");
-    strcat(body, "<body bgcolor=\"ffffff\">\r\n");
-    snprintf(tmp, sizeof(tmp), "%s: %s\r\n", errnum, shortmsg);
-    strcat(body, tmp);
-    snprintf(tmp, sizeof(tmp), "<p>%s: %s\r\n", longmsg, cause);
-    strcat(body, tmp);
-    */
+    sprintf(body, "<html><title>Oops!</title>"
+                  "<meta charset=\"utf-8\">\r\n"
+                  "<body bgcolor=\"ffffff\">\r\n"
+                  "%s: %s\r\n"
+                  "<p>%s: %s\r\n", 
+                  errnum, shortmsg, longmsg, cause);
 
     // HTTP响应报文
-    sprintf(buf, "HTTP/1.0 %s %s\r\n", errnum, shortmsg);
-    sprintf(buf, "%sContent-type: text/html\r\n", buf);
-    sprintf(buf, "%sContent-length: %d\r\n\r\n", buf, (int)strlen(body));
-
-    /*
-    snprintf(buf, sizeof(buf), "HTTP/1.0 %s %s\r\n", errnum, shortmsg);
-    strcat(buf, "Content-type: text/html\r\n");
-    snprintf(tmp, sizeof(tmp), "Content-length: %d\r\n\r\n", (int)strlen(body));
-    strcat(buf, tmp);
-    */
+    sprintf(buf, "HTTP/1.0 %s %s\r\n"
+                 "Content-type: text/html\r\n"
+                 "Content-length: %d\r\n\r\n", 
+                 errnum, shortmsg, (int)strlen(body));
 
     send(fd, buf, strlen(buf), 0);
     send(fd, body, strlen(body), 0);
@@ -253,29 +239,17 @@ void HttpServer::_staticResponse(int fd, const char *filepath, int filesize, boo
 
     _getMIME(filepath, MIME);
 
-    sprintf(buf, "HTTP/1.1 200 OK\r\n");
-    sprintf(buf, "%sServer: CYX PC\r\n", buf);
+    sprintf(buf, "HTTP/1.1 200 OK\r\n"
+                 "Server: CYX PC\r\n");
     if (persistent) {
         sprintf(buf, "%sConnection: keep-alive\r\n", buf);
     } else {
         sprintf(buf, "%sConnection: close\r\n", buf);
     }
-    sprintf(buf, "%sContent-length: %d\r\n", buf, filesize);
-    sprintf(buf, "%sContent-type: %s\r\n\r\n", buf, MIME);
+    sprintf(buf, "%sContent-length: %d\r\n"
+                 "Content-type: %s\r\n\r\n", 
+                 buf, filesize, MIME);
 
-    /*
-    strcpy(buf, "HTTP/1.1 200 OK\r\n");
-    strcat(buf, "Server: CYX PC\r\n");
-    if (persistent) {
-        strcat(buf, "Connection: keep-alive\r\n");
-    } else {
-        strcat(buf, "Connection: close\r\n");
-    }
-    snprintf(tmp, sizeof(tmp), "Content-length: %d\r\n", filesize);
-    strcat(buf, tmp);
-    snprintf(tmp, sizeof(tmp), "Content-type: %s\r\n\r\n", MIME);
-    strcat(buf, tmp);
-    */
     send(fd, buf, strlen(buf), 0);
     
     srcfd = open(filepath, O_RDONLY, 0);

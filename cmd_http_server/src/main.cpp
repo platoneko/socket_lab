@@ -38,7 +38,7 @@ void listenThreadRoutine() {
 
 int main(int argc,char *argv[]) {
     char opt;
-    int port = 80, listenQueue = 32;
+    int port = 23333, listenQueue = 32;
     std::string addr = "INADDR_ANY", root = "/home/cyx/platoneko.github.io/public";
     uint i_addr = INADDR_ANY;
     std::regex IP_PATTERN("(25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]\\d|\\d)\\."
